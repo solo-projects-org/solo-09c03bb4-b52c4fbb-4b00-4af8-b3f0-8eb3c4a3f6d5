@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>电子导览 A/B 评估</title>
+<style>
+:root { --bd:#d7dce3; --bg:#f5f7fa; --ok:#1a7f37; --err:#c0392b; --info:#57606a; }
+* { box-sizing: border-box; }
+body { margin:0; font-family: "PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+       background:var(--bg); color:#1f2328; }
+header { background:#0f3d5c; color:#fff; padding:16px 28px; }
+header h1 { margin:0; font-size:20px; }
+header p { margin:6px 0 0; font-size:13px; opacity:.85; }
+main { max-width:1080px; margin:22px auto; padding:0 18px; }
+.card { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:18px 22px; margin-bottom:20px; }
+.card h2 { margin:0 0 12px; font-size:16px; border-left:4px solid #0f3d5c; padding-left:8px; }
+table { border-collapse:collapse; width:100%; font-size:13px; }
+th,td { border:1px solid var(--bd); padding:6px 9px; text-align:center; }
+th { background:#eef2f6; }
+td.l, th.l { text-align:left; }
+.flash { padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:14px; }
+.flash.ok { background:#e6f4ea; color:var(--ok); border:1px solid #b7dfc4; }
+.flash.error { background:#fdecea; color:var(--err); border:1px solid #f5c6c0; }
+.flash.info { background:#eef0f3; color:var(--info); border:1px solid #d0d7de; }
+.badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600; }
+.badge.A { background:#e3f0ff; color:#0969da; }
+.badge.B { background:#fff1e0; color:#bc4c00; }
+.badge.NONE { background:#f0f0f0; color:#57606a; }
+.badge.VALID { background:#e6f4ea; color:var(--ok); }
+.badge.INVALIDATED { background:#fdecea; color:var(--err); }
+button { background:#0f3d5c; color:#fff; border:0; border-radius:7px; padding:9px 18px;
+         font-size:14px; cursor:pointer; }
+button:disabled { background:#9aa7b2; cursor:not-allowed; }
+input[type=file] { font-size:13px; }
+.muted { color:var(--info); font-size:12px; }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+code { background:#f3f4f6; padding:1px 5px; border-radius:4px; }
+.small { font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>展馆电子导览 A/B 两轮评估台</h1>
+  <p>规则：首轮每组前 {{ round1_size }} 人，双侧 Fisher 精确检验，p ≤ {{ alpha }} 且完成率高者胜出；首轮不显著则第二轮用每组全部 {{ group_size }} 人；两轮均不显著则无胜出。缺报者枚举所有可能结果，同一人两轮状态一致。</p>
+</header>
+<main>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+{% endwith %}
+
+<section class="card">
+  <h2>① 底表上报情况</h2>
+  <table>
+    <tr><th>组别</th><th>已报完成</th><th>已报未完成</th><th>缺报（首轮内）</th><th>缺报（全员新增）</th><th>缺报合计</th></tr>
+    {% for g in groups %}
+    {% set f = analysis.facts[g] %}
+    <tr>
+      <td><b>{{ g }} 组</b></td>
+      <td>{{ f.r2_fixed_done }}</td>
+      <td>{{ f.reported - f.r2_fixed_done }}</td>
+      <td>{{ f.r1_missing }}</td>
+      <td>{{ f.tail_missing }}</td>
+      <td>{{ f.r2_missing }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted">名单与顺序为预置 A001–A040、B001–B040；编号 ≤ {{ round1_size }} 进入首轮。</p>
+</section>
+
+<section class="card">
+  <h2>② 缺报推演：每种可能结论及一组可得到它的两轮分组完成数</h2>
+  <p class="muted">共枚举 {{ analysis.total_scenarios }} 种缺报赋值（同一缺报者在两轮中完成状态强制一致）。p 值为精确分数，括注小数。</p>
+  <table>
+    <tr>
+      <th>可能结论</th>
+      <th>首轮 A 完成 / B 完成（共 {{ round1_size }}+{{ round1_size }}）</th>
+      <th>首轮 p</th>
+      <th>第二轮 A 完成 / B 完成（共 {{ group_size }}+{{ group_size }}）</th>
+      <th>第二轮 p</th>
+      <th>说明</th>
+    </tr>
+    {% for key in ['A','B','NONE'] if key in analysis.possible %}
+    {% set sc = analysis.examples[key] %}
+    <tr>
+      <td><span class="badge {{ key }}">{{ conclusion_label[key] }}</span></td>
+      <td>{{ sc.r1_a }} / {{ sc.r1_b }}</td>
+      <td class="small">{{ sc.r1_p.numerator }}/{{ sc.r1_p.denominator }}<br>(≈ {{ '%.5f'|format(sc.r1_p|float) }})</td>
+      <td>{% if sc.r2_a is none %}—（首轮停止）{% else %}{{ sc.r2_a }} / {{ sc.r2_b }}{% endif %}</td>
+      <td class="small">{% if sc.r2_p is none %}—{% else %}{{ sc.r2_p.numerator }}/{{ sc.r2_p.denominator }}<br>(≈ {{ '%.5f'|format(sc.r2_p|float) }}){% endif %}</td>
+      <td class="l small">{{ sc.note }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <h2>③ 签发结论</h2>
+  {% if analysis.can_issue %}
+    <p>按最新底表核实，<b>{{ conclusion_label[analysis.unique_conclusion] }}</b> 是当前<b>唯一可能</b>结论，可以签发。</p>
+    <form method="post" action="{{ url_for('issue') }}">
+      <input type="hidden" name="conclusion" value="{{ analysis.unique_conclusion }}">
+      <button type="submit">签发：{{ conclusion_label[analysis.unique_conclusion] }}</button>
+    </form>
+  {% else %}
+    <p>当前可能结论有 <b>{{ analysis.possible|length }}</b> 种（{{ analysis.possible|map('string')|join('、') }}），<b>不满足唯一可能，不能签发</b>。继续补报后再核实。</p>
+    <button disabled>无法签发（结论不唯一）</button>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>④ 上传 CSV 补报 / 更正</h2>
+  <p class="muted">格式 <code>id,status</code>，可选表头；status 取 1/0、yes/no、true/false 或 完成/未完成。整批校验，任一行非法则全部不写入。更正后若原结论不再唯一，有效旧签发将自动标记失效。</p>
+  <form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+    <input type="file" name="csv_file" accept=".csv,text/csv" required>
+    <button type="submit">上传并更新底表</button>
+    <a class="muted" href="{{ url_for('roster_template') }}">下载当前底表 CSV 模板</a>
+  </form>
+</section>
+
+<section class="card">
+  <h2>⑤ 签发记录</h2>
+  {% if issuances %}
+  <table>
+    <tr><th>编号</th><th>结论</th><th>签发时间(UTC)</th><th>状态</th><th class="l">失效原因/时间</th></tr>
+    {% for it in issuances %}
+    <tr>
+      <td>{{ it.id }}</td>
+      <td><span class="badge {{ it.conclusion }}">{{ conclusion_label[it.conclusion] }}</span></td>
+      <td class="small">{{ it.issued_at }}</td>
+      <td><span class="badge {{ it.status }}">{{ '有效' if it.status=='VALID' else '已失效' }}</span></td>
+      <td class="l small">{% if it.invalidate_reason %}{{ it.invalidate_reason }}<br>{{ it.invalidated_at }}{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">暂无签发记录。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>⑥ 最近更正记录</h2>
+  {% if corrections %}
+  <table>
+    <tr><th>序号</th><th>访客编号</th><th>原状态</th><th>新状态</th><th>时间(UTC)</th></tr>
+    {% for c in corrections %}
+    <tr>
+      <td>{{ c.id }}</td><td>{{ c.visitor_id }}</td>
+      <td>{{ '缺报' if c.old_status is none else ('完成' if c.old_status==1 else '未完成') }}</td>
+      <td>{{ '完成' if c.new_status==1 else '未完成' }}</td>
+      <td class="small">{{ c.created_at }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">暂无更正记录。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>⑦ 完整底表</h2>
+  <div class="grid2">
+  {% for g in groups %}
+  <table>
+    <tr><th colspan="3">{{ g }} 组（按入组顺序）</th></tr>
+    <tr><th>编号</th><th>顺位</th><th>状态</th></tr>
+    {% for v in visitors if v.group_name == g %}
+    <tr><td>{{ v.id }}</td><td>{{ v.seq }}</td>
+      <td>{% if v.status is none %}<span class="muted">缺报</span>{% elif v.status==1 %}完成{% else %}未完成{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% endfor %}
+  </div>
+</section>
+</main>
+</body>
+</html>
